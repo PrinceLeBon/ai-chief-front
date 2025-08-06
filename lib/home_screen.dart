@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -29,6 +31,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, String> get _strings => _isFrench ? AppStrings.fr : AppStrings.en;
 
   // MODIFIÉ : La logique d'appel et d'analyse est améliorée
+  // Dans votre _HomeScreenState
+
   Future<void> _generateRecipe() async {
     if (_ingredientsController.text.isEmpty) return;
 
@@ -38,59 +42,43 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
 
-    // --- DÉBUT DE LA MODIFICATION ---
-
-    // 1. On transforme la chaîne de texte en une liste propre
-    // "poulet, tomate, oignon" -> ["poulet", "tomate", "oignon"]
-    final List<String> ingredientsList =
-        _ingredientsController.text
-            .split(',') // Sépare la chaîne par les virgules
-            .map(
-              (e) => e.trim(),
-            ) // Enlève les espaces avant/après chaque ingrédient
-            .where((e) => e.isNotEmpty) // Retire les éléments vides
-            .toList();
-
-    // 2. On détermine le code de la langue
-    final String languageCode = _isFrench ? 'fr' : 'en';
-
-    // 3. On construit l'objet (payload) à envoyer
-    final Map<String, dynamic> payload = {
-      'ingredients': ingredientsList,
-      'language': languageCode,
-    };
-
-    // --- FIN DE LA MODIFICATION ---
-
     try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(payload),
-      );
+      final List<String> ingredientsList =
+          _ingredientsController.text
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+
+      final String languageCode = _isFrench ? 'fr' : 'en';
+
+      final Map<String, dynamic> payload = {
+        'ingredients': ingredientsList,
+        'language': languageCode,
+      };
+
+      final response = await http
+          .post(
+            Uri.parse(_apiUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(payload),
+          )
+          .timeout(const Duration(seconds: 30)); // NOUVEAU : Ajout d'un timeout
+
+      // ---- GESTION DE LA RÉPONSE ----
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        // 1. On décode la réponse principale
+        // Cas de succès (le code ici ne change pas)
         final responseBody = json.decode(utf8.decode(response.bodyBytes));
-
-        // 2. On extrait la chaîne de caractères qui contient le JSON de la recette
         final recipeString = responseBody['recipe'] as String;
-
-        // 3. NOUVEAU : On utilise une expression régulière pour extraire proprement le JSON
-        // qui est à l'intérieur du bloc de code ```json ... ```
         final regExp = RegExp(r'```json\n([\s\S]*?)\n```');
         final match = regExp.firstMatch(recipeString);
 
         if (match != null) {
           final recipeJsonString = match.group(1)!;
-          Logger().i("JSON de la recette extrait: $recipeJsonString");
-          // 4. On décode enfin le JSON de la recette
           setState(() {
             _recipeResult = json.decode(recipeJsonString);
           });
-          Logger().i("Recette générée avec succès: $_recipeResult");
-
-          // NOUVEAU : On affiche un message de succès
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(responseBody['message'] ?? 'Recette trouvée !'),
@@ -98,19 +86,62 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
         } else {
-          throw Exception('Format de recette JSON non trouvé.');
+          // NOUVEAU : Erreur de formatage de la réponse
+          throw const FormatException(
+            "La recette du Chef est dans un format inattendu.",
+          );
         }
-      } else {
-        Logger().e("Erreur de l'API: ${response.statusCode}");
-        Logger().e("Erreur de l'API: ${response.body}");
+      }
+      // NOUVEAU : Gérer les erreurs du serveur (ex: le backend a planté)
+      else if (response.statusCode >= 500) {
+        Logger().e("Erreur Serveur: ${response.statusCode} | ${response.body}");
         setState(() {
-          _error = _strings['errorText'];
+          _error =
+              "La cuisine du Chef est en surchauffe ! 🍳 Veuillez réessayer dans un petit instant.";
         });
       }
-    } catch (e) {
+      // NOUVEAU : Gérer les erreurs client (ex: données envoyées incorrectes)
+      else if (response.statusCode >= 400) {
+        Logger().e("Erreur Client: ${response.statusCode} | ${response.body}");
+        setState(() {
+          _error =
+              "Le Chef n'a pas compris la commande. Vérifiez votre liste d'ingrédients.";
+        });
+      }
+      // NOUVEAU : Gérer les autres cas
+      else {
+        Logger().e(
+          "Erreur Inconnue: ${response.statusCode} | ${response.body}",
+        );
+        setState(() {
+          _error = "Un problème mystérieux est survenu. Le Chef enquête...";
+        });
+      }
+    }
+    // NOUVEAU : Gérer les différents types d'exceptions
+    on SocketException catch (e) {
+      Logger().e("Erreur Réseau: $e");
       setState(() {
-        _error = _strings['errorText'];
-        Logger().e('Erreur: $e'); // Pour le débogage
+        _error =
+            "Impossible de joindre la cuisine du Chef. 📞 Vérifiez votre connexion internet.";
+      });
+    } on TimeoutException catch (e) {
+      Logger().e("Erreur de Timeout: $e");
+      setState(() {
+        _error =
+            "Le Chef a pris trop de temps pour répondre. Il est sûrement très occupé !";
+      });
+    } on FormatException catch (e) {
+      Logger().e("Erreur de Format: $e");
+      setState(() {
+        _error =
+            "Le Chef a écrit une recette illisible ! 📖 Nous n'avons pas pu la déchiffrer.";
+      });
+    } catch (e) {
+      Logger().e("Erreur Générique: $e");
+      setState(() {
+        _error =
+            "Un imprévu est survenu en cuisine. Le Chef fait de son mieux !";
       });
     } finally {
       setState(() {
