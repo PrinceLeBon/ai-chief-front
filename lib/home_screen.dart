@@ -79,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _recipeResult = json.decode(recipeJsonString);
           });
+          Logger().i(_recipeResult);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(responseBody['message'] ?? 'Recette trouvée !'),
@@ -322,14 +323,18 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _recipeResult!['nom_recette'] ?? _strings['recipeName'],
+              _recipeResult!['nom_recette'] ??
+                  _recipeResult!['recipe_name'] ??
+                  _strings['recipeName'],
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             Text(
-              _recipeResult!['description_courte'] ?? '',
+              _recipeResult!['description_courte'] ??
+                  _recipeResult!['short_description'] ??
+                  '',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 fontStyle: FontStyle.italic,
                 color: AppColors.textLight.withValues(alpha: 0.8),
